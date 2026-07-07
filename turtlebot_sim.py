@@ -61,7 +61,7 @@ class CmdVelToJoints(Node):
 
         # Continuously publish joint commands at 50 Hz so the bridge always
         # receives fresh commands and keeps sensors (LiDAR, camera) active.
-        self.timer = self.create_timer(1.0 / 50.0, self._publish_joint_commands)
+        self.timer = self.create_timer(1.0 / 20.0, self._publish_joint_commands)
 
     def cmd_vel_callback(self, msg):
         v = msg.linear.x
@@ -111,7 +111,7 @@ class OdometryPublisher(Node):
         self.prev_time = None
 
         # Publish at 50 Hz
-        self.timer = self.create_timer(1.0 / 50.0, self._publish_odom)
+        self.timer = self.create_timer(1.0 / 20.0, self._publish_odom)
 
     def _get_robot(self):
         """Lazily get the robot entity from the bridge after scene is built."""
@@ -239,6 +239,100 @@ def launch_robot_state_publisher():
     return proc
 
 
+def add_aruco_markers_and_obstacles(scene):
+    """
+    Add 3 ArUco markers (vertical, textured) and obstacle cubes to the scene.
+
+    ArUco markers are from DICT_4X4_1000: IDs 67, 69, 88.
+    They are placed as thin vertical boxes with the marker texture on front,
+    so the turtlebot's forward-facing camera can detect them.
+
+    Obstacles are solid colored cubes scattered around the arena to create
+    a navigation challenge for inductees using Nav2.
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    texture_dir = os.path.join(script_dir, "aruco_textures")
+
+    # --- ArUco Marker Definitions ---
+    # Each marker: (id, texture_file, x, y)
+    # Placed in a ~6m×6m arena, positions chosen so inductees must navigate
+    # to different quadrants. Since they are cubes, they are visible from all sides.
+    aruco_markers = [
+        {
+            "id": 67,
+            "texture": os.path.join(texture_dir, "4x4_1000-67.png"),
+            "pos": (2.5, 1.8, 0.09),    # NE quadrant, sitting on the floor
+            "euler": (0, 0, 0),
+        },
+        {
+            "id": 69,
+            "texture": os.path.join(texture_dir, "4x4_1000-69.png"),
+            "pos": (-2.0, 2.2, 0.09),   # NW quadrant, sitting on the floor
+            "euler": (0, 0, 0),
+        },
+        {
+            "id": 88,
+            "texture": os.path.join(texture_dir, "4x4_1000-88.png"),
+            "pos": (1.0, -2.5, 0.09),   # SE quadrant, sitting on the floor
+            "euler": (0, 0, 0),
+        },
+    ]
+
+    marker_size = 0.18  # 18cm ArUco marker (matches original Gazebo model)
+    cube_mesh = os.path.join(texture_dir, "marker_cube.obj")
+
+    for marker in aruco_markers:
+        # Use a cube mesh with UVs on all faces so it is visible on all 4 sides
+        scene.add_entity(
+            morph=gs.morphs.Mesh(
+                file=cube_mesh,
+                scale=marker_size,  # scale unit cube to 18cm on all sides
+                pos=marker["pos"],
+                euler=marker["euler"],
+                fixed=True,
+                collision=True,
+                visualization=True,
+            ),
+            surface=gs.surfaces.Rough(
+                diffuse_texture=gs.textures.ImageTexture(
+                    image_path=marker["texture"],
+                ),
+            ),
+        )
+        print(f"[turtlebot_sim] Added ArUco marker ID {marker['id']} at {marker['pos']}")
+
+    # --- Obstacle Cubes ---
+    # Randomly scattered cubes of varying sizes and muted colors.
+    # Positions are fixed (deterministic) so the environment is reproducible.
+    obstacles = [
+        # (x, y, size, height, color)
+        ( 1.0,  1.0, 0.35, 0.40, (0.55, 0.35, 0.25)),  # brown
+        (-1.5,  0.5, 0.30, 0.35, (0.40, 0.40, 0.45)),  # slate
+        ( 0.5, -1.0, 0.40, 0.50, (0.35, 0.50, 0.35)),  # green-gray
+        (-0.8, -1.8, 0.25, 0.30, (0.50, 0.40, 0.30)),  # tan
+        ( 2.0, -0.5, 0.30, 0.45, (0.45, 0.30, 0.30)),  # rust
+        (-2.5, -1.0, 0.35, 0.35, (0.30, 0.35, 0.50)),  # steel blue
+        ( 0.0,  2.0, 0.30, 0.40, (0.50, 0.50, 0.35)),  # olive
+        (-1.0,  2.5, 0.40, 0.50, (0.40, 0.30, 0.40)),  # plum
+        ( 2.5, -2.0, 0.25, 0.30, (0.35, 0.45, 0.40)),  # teal-gray
+        (-2.0,  1.5, 0.35, 0.45, (0.45, 0.35, 0.40)),  # mauve
+    ]
+
+    for i, (ox, oy, size, height, color) in enumerate(obstacles):
+        scene.add_entity(
+            morph=gs.morphs.Box(
+                size=(size, size, height),
+                pos=(ox, oy, height / 2.0),  # sit on the ground
+                fixed=True,
+                collision=True,
+                visualization=True,
+            ),
+            surface=gs.surfaces.Rough(color=color),
+        )
+
+    print(f"[turtlebot_sim] Added {len(obstacles)} obstacle cubes")
+
+
 def main():
     # 1. Initialize Genesis with performance mode enabled
     gs.init(backend=gs.gpu, performance_mode=True)
@@ -254,13 +348,17 @@ def main():
         file_path="turtlebot_config.yaml",
     )
 
-    # 4. Build the scene
+    # 4. Populate scene with ArUco markers and obstacle cubes
+    #    (must be done after bridge __init__ but before build)
+    add_aruco_markers_and_obstacles(ros_bridge.scene)
+
+    # 5. Build the scene
     ros_bridge.build()
 
-    # 5. Launch robot_state_publisher for URDF TF frames
+    # 6. Launch robot_state_publisher for URDF TF frames
     rsp_proc = launch_robot_state_publisher()
 
-    # 6. Create odometry publisher (odom -> base_footprint TF + /odom topic)
+    # 7. Create odometry publisher (odom -> base_footprint TF + /odom topic)
     odom_node = OdometryPublisher(ros_bridge, robot_name="turtlebot")
 
     # Configure executor to spin all nodes (including sensor nodes)
@@ -280,7 +378,7 @@ def main():
         executor.add_node(ros_bridge.simulation_interface)
         delattr(ros_bridge, "simulation_interface")
 
-    # 7. Simulation loop - bridge.step() handles physics
+    # 8. Simulation loop - bridge.step() handles physics
     try:
         while rclpy.ok():
             ros_bridge.step()

@@ -1,7 +1,7 @@
 scene:
   n_envs: 1
   sim:
-    dt: 0.01
+    dt: 0.02
     substeps: 1
 
   show_Viewer: true
@@ -17,6 +17,7 @@ scene:
 
   vis_config:
     show_cameras: false
+    show_world_frame: false
     shadow: false
     plane_reflection: false
     lights:
@@ -30,7 +31,7 @@ scene:
     enable_collision: true
     enable_joint_limit: true
     enable_self_collision: false
-    max_collision_pairs: 300
+    max_collision_pairs: 200
 
 world:
   name: plane
@@ -44,11 +45,11 @@ robots:
     namespace: "turtlebot"
     control:
       joint_commands_topic: joint_commands
-      joint_commands_topic_frequency: 50
+      joint_commands_topic_frequency: 20
       joint_states_topic: joint_states
-      joint_states_topic_frequency: 50
+      joint_states_topic_frequency: 20
       joint_control_topic: joint_control
-      joint_control_topic_frequency: 50
+      joint_control_topic_frequency: 20
       joint_properties:
         "wheel_left_joint":
           kp: 50
@@ -66,7 +67,7 @@ robots:
       quat: null
       visualization: true
       collision: true
-      requires_jac_and_IK: true
+      requires_jac_and_IK: false
       scale: 1.0
       convexify: null
       recompute_inertia: false
@@ -85,7 +86,7 @@ robots:
       coup_restitution: 0.0
       sdf_cell_size: 0.005
       sdf_min_res: 32
-      sdf_max_res: 128
+      sdf_max_res: 64
       gravity_compensation: 0
 
     sensors:
@@ -97,7 +98,7 @@ robots:
         draw_debug: false
       ros_options:
         frame_id: "base_scan"
-        frequency: 10.0
+        frequency: 5.0
         topic: scan
         qos_history: keep_last
         qos_depth: 10
@@ -109,7 +110,7 @@ robots:
         euler_offset: [0.0, 0.0, 0.0]
       spherical_pattern:
         fov: [360.0, 1.0]
-        n_points: [2, 360]
+        n_points: [2, 180]
       min_range: 0.12
       max_range: 3.5
       draw_point_radius: 0.03
@@ -128,7 +129,7 @@ robots:
         draw_debug: false
       ros_options:
         frame_id: "camera_rgb_optical_frame"
-        frequency: 15.0
+        frequency: 5.0
         qos_history: keep_last
         qos_depth: 10
         qos_reliability: reliable
@@ -138,13 +139,13 @@ robots:
         pos_offset: [0.0, 0.0, 0.0]
         euler_offset: [90.0, 0.0, -90.0]
       camera_types: [rgb, depth]
-      res: [640, 480]
+      res: [480, 360]
       fov: 60.0
       near: 0.05
       far: 10.0
       aperture: 2.8
       denoise: false
-      spp: 4
+      spp: 1
       model: pinhole
       focus_dist: 0.0
       gui: false
