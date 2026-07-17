@@ -1,3 +1,11 @@
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["OMP_WAIT_POLICY"] = "PASSIVE"
+
 import genesis as gs
 from gs_ros.gs_ros_bridge import GsRosBridge
 import rclpy
@@ -41,6 +49,34 @@ def patched_lidar_init(self, *args, **kwargs):
         kwargs["debug_sphere_radius"] = 0.01
     original_lidar_init(self, *args, **kwargs)
 gs.sensors.Lidar.__init__ = patched_lidar_init
+
+# 5. Patch CvBridge to strip alpha channel from RGBA images
+# Genesis renders RGBA (4-channel) when textured objects are present with
+# performance_mode=True. cv_bridge can't map CV_8UC4 (cv_type 24) to
+# 3-channel encodings like "rgb8"/"bgr8", causing KeyError: 16 in standard
+# cv_bridge due to environment mismatches (e.g. cv2 import differences).
+from cv_bridge import CvBridge
+_original_cv2_to_imgmsg = CvBridge.cv2_to_imgmsg
+def _patched_cv2_to_imgmsg(self, cvim, encoding="passthrough"):
+    # Ensure cvtype_to_name is fully populated to avoid KeyError: 16 or similar
+    if not hasattr(self, 'cvtype_to_name') or not self.cvtype_to_name:
+        self.cvtype_to_name = {}
+    
+    # Standard mappings for 8U, 8S, 16U, 16S, 32S, 32F, 64F with 1-4 channels
+    # cvtype value is depth + (channels-1)*8
+    depth_values = {
+        '8U': 0, '8S': 1, '16U': 2, '16S': 3, '32S': 4, '32F': 5, '64F': 6
+    }
+    for t, val in depth_values.items():
+        for c in [1, 2, 3, 4]:
+            self.cvtype_to_name[val + (c - 1) * 8] = f"{t}C{c}"
+
+    if hasattr(cvim, 'ndim') and cvim.ndim == 3 and cvim.shape[2] == 4:
+        if encoding in ("rgb8", "bgr8"):
+            cvim = cvim[:, :, :3]
+    return _original_cv2_to_imgmsg(self, cvim, encoding)
+CvBridge.cv2_to_imgmsg = _patched_cv2_to_imgmsg
+
 
 class CmdVelToJoints(Node):
     def __init__(self):
@@ -334,6 +370,11 @@ def add_aruco_markers_and_obstacles(scene):
 
 
 def main():
+    # Limit PyTorch CPU thread usage
+    import torch
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+
     # 1. Initialize Genesis with performance mode enabled
     gs.init(backend=gs.gpu, performance_mode=True)
 
@@ -380,9 +421,18 @@ def main():
 
     # 8. Simulation loop - bridge.step() handles physics
     try:
+        import time
+        target_period = 1.0 / 60.0  # 60 Hz target
         while rclpy.ok():
+            start_time = time.time()
             ros_bridge.step()
             executor.spin_once(timeout_sec=0)
+            
+            # Calculate elapsed time and sleep only the remaining duration
+            elapsed = time.time() - start_time
+            sleep_time = target_period - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
     except KeyboardInterrupt:
         pass
     finally:

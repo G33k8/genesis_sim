@@ -129,7 +129,7 @@ robots:
         draw_debug: false
       ros_options:
         frame_id: "camera_rgb_optical_frame"
-        frequency: 5.0
+        frequency: 10.0
         qos_history: keep_last
         qos_depth: 10
         qos_reliability: reliable
